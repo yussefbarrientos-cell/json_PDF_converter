@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JSON to Ornamental PDF</title>
+<style>
+  :root { --paper:#f3ede0; --ink:#2b2433; --plum:#5a2a4a; --gold:#a7803a; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; padding:24px;
+    background:#e4dccb; color:var(--ink); font-family:Georgia,"Times New Roman",serif; }
+  main { width:min(560px,100%); background:var(--paper); padding:40px 32px; text-align:center;
+    outline:2px solid var(--plum); outline-offset:-10px; border:1px solid var(--gold); }
+  h1 { margin:0 0 6px; font-weight:normal; font-size:1.9rem; font-style:italic; color:var(--plum); }
+  .orn { color:var(--gold); letter-spacing:.6em; margin:10px 0 18px; }
+  p { margin:0 0 20px; line-height:1.55; }
+  #drop { border:2px dashed var(--gold); padding:30px 16px; cursor:pointer; transition:background .15s; }
+  #drop.over, #drop:focus-visible { background:#ebe0c8; outline:none; }
+  label.opt { display:block; margin:18px 0; font-size:.95rem; }
+  button { font:inherit; font-size:1.05rem; padding:10px 28px; background:var(--plum); color:#fff;
+    border:1px solid var(--gold); cursor:pointer; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  #msg { margin-top:16px; min-height:1.4em; font-size:.95rem; }
+  #msg.err { color:#a02020; }
+</style>
+</head>
+<body>
+<main>
+  <h1>JSON to Ornamental PDF</h1>
+  <div class="orn" aria-hidden="true">&#10086; &#9670; &#10087;</div>
+  <p>Choose a .json file and get a plain-text PDF with a decorative border and flourishes. Everything runs in your browser; nothing is uploaded.</p>
+  <div id="drop" tabindex="0" role="button" aria-label="Choose a JSON file">
+    <span id="fname">Drop a .json file here, or click to browse</span>
+    <input id="file" type="file" accept=".json,application/json" hidden>
+  </div>
+  <label class="opt"><input type="checkbox" id="human" checked> Make field names readable (ws_full_pos_0 &rarr; Ws Full Pos 0)</label>
+  <button id="go" disabled>Create PDF</button>
+  <div id="msg" role="status"></div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let data = null, baseName = "document";
+
+// ---------- file handling ----------
+const drop = $("drop"), input = $("file");
+drop.onclick = () => input.click();
+drop.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } };
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); load(e.dataTransfer.files[0]); };
+input.onchange = () => load(input.files[0]);
+
+function say(t, err) { $("msg").textContent = t; $("msg").className = err ? "err" : ""; }
+
+function load(f) {
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      data = JSON.parse(r.result);
+      baseName = f.name.replace(/\.json$/i, "");
+      $("fname").textContent = f.name;
+      $("go").disabled = false;
+      say("Ready. Click Create PDF.");
+    } catch (e) {
+      data = null; $("go").disabled = true;
+      say("That file is not valid JSON: " + e.message, true);
+    }
+  };
+  r.readAsText(f);
+}
+
+// ---------- text helpers ----------
+const CP1252 = "€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ";
+function clean(s) {  // jsPDF's built-in fonts only support Latin-1 / WinAnsi
+  return String(s).replace(/\r/g, "").replace(/\t/g, "    ")
+    .replace(/[^\n\x20-\x7e\u00a0-\u00ff]/g, c => CP1252.includes(c) ? c : "?");
+}
+function nice(k, on) {
+  if (!on) return String(k);
+  return String(k).replace(/[_\-]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// ---------- ornaments (vector, no fonts needed) ----------
+const PLUM = [90, 42, 74], GOLD = [167, 128, 58], INK = [43, 36, 51], PAPER = [243, 237, 224];
+
+function corner(doc, x, y, sx, sy) {
+  // mirrored curl flourish anchored at corner (x,y); sx/sy = +1/-1 direction into page
+  const P = (a, b) => [x + sx * a, y + sy * b];
+  const bez = (s, c1, c2, e) => {
+    const p0 = P(...s), p1 = P(...c1), p2 = P(...c2), p3 = P(...e);
+    doc.lines([[p1[0]-p0[0], p1[1]-p0[1], p2[0]-p0[0], p2[1]-p0[1], p3[0]-p0[0], p3[1]-p0[1]]], p0[0], p0[1], [1, 1], "S");
+  };
+  doc.setDrawColor(...GOLD); doc.setLineWidth(0.5);
+  bez([0, 22], [0, 12], [3, 4], [12, 3]);          // long arm along side
+  bez([22, 0], [12, 0], [4, 3], [3, 12]);          // long arm along top
+  bez([6, 6], [14, 6], [14, 14], [9, 14]);         // inner curl
+  bez([6, 6], [6, 14], [14, 14], [14, 9]);         // inner curl mirrored
+  doc.setFillColor(...PLUM);
+  const c = P(6, 6); doc.circle(c[0], c[1], 0.9, "F");
+  const d1 = P(24, 1.5), d2 = P(1.5, 24);
+  doc.setFillColor(...GOLD);
+  doc.circle(d1[0], d1[1], 0.7, "F"); doc.circle(d2[0], d2[1], 0.7, "F");
+}
+
+function diamond(doc, cx, cy, r, fill) {
+  doc.setFillColor(...fill);
+  doc.lines([[r, r], [-r, r], [-r, -r], [r, -r]], cx, cy - r, [1, 1], "F");
+}
+
+function divider(doc, cx, y, half) {
+  doc.setDrawColor(...GOLD); doc.setLineWidth(0.35);
+  doc.line(cx - half, y, cx - 6, y); doc.line(cx + 6, y, cx + half, y);
+  diamond(doc, cx, y, 2, PLUM);
+  diamond(doc, cx - 5, y, 0.9, GOLD); diamond(doc, cx + 5, y, 0.9, GOLD);
+  doc.setFillColor(...GOLD);
+  doc.circle(cx - half - 1.5, y, 0.6, "F"); doc.circle(cx + half + 1.5, y, 0.6, "F");
+}
+
+function frame(doc, W, H) {
+  doc.setFillColor(...PAPER); doc.rect(0, 0, W, H, "F");
+  doc.setDrawColor(...PLUM); doc.setLineWidth(1.1); doc.rect(9, 9, W - 18, H - 18);
+  doc.setDrawColor(...GOLD); doc.setLineWidth(0.3); doc.rect(11.5, 11.5, W - 23, H - 23);
+  corner(doc, 11.5, 11.5, 1, 1); corner(doc, W - 11.5, 11.5, -1, 1);
+  corner(doc, 11.5, H - 11.5, 1, -1); corner(doc, W - 11.5, H - 11.5, -1, -1);
+}
+
+// ---------- PDF builder ----------
+function build(value, title, human) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const W = 210, H = 297, ML = 26, MR = 26, TOP = 28, BOT = H - 28, CW = W - ML - MR;
+  let y = TOP, page = 1;
+
+  frame(doc, W, H);
+
+  const newPage = () => { doc.addPage(); page++; frame(doc, W, H); y = TOP; };
+  const need = h => { if (y + h > BOT) newPage(); };
+
+  // title block
+  doc.setFont("times", "bolditalic"); doc.setFontSize(24); doc.setTextColor(...PLUM);
+  const tl = doc.splitTextToSize(clean(nice(title, human)), CW);
+  y += 8;
+  doc.text(tl, W / 2, y, { align: "center" }); y += tl.length * 10 - 2;
+  doc.setFont("times", "italic"); doc.setFontSize(10); doc.setTextColor(...GOLD);
+  doc.text(new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }), W / 2, y + 3, { align: "center" });
+  y += 11; divider(doc, W / 2, y, 38); y += 12;
+
+  // body
+  function label(text, indent) {
+    need(14);
+    diamond(doc, ML + indent + 1.2, y - 1.2, 1.2, GOLD);
+    doc.setFont("times", "bold"); doc.setFontSize(12); doc.setTextColor(...PLUM);
+    const lines = doc.splitTextToSize(clean(text), CW - indent - 5);
+    doc.text(lines, ML + indent + 4.5, y);
+    y += lines.length * 5.6;
+  }
+  function para(text, indent) {
+    doc.setFont("times", "normal"); doc.setFontSize(11.5); doc.setTextColor(...INK);
+    const lines = doc.splitTextToSize(clean(text === "" ? "(empty)" : text), CW - indent);
+    for (const ln of lines) { need(6); doc.text(ln, ML + indent, y); y += 5.6; }
+  }
+  const isObj = v => v !== null && typeof v === "object";
+
+  function walk(key, v, indent) {
+    if (isObj(v)) {
+      const entries = Array.isArray(v) ? v.map((x, i) => [String(i + 1), x]) : Object.entries(v);
+      if (key !== null) { label(key, indent); y += 1; indent += 6; }
+      if (!entries.length) { para("(empty)", indent); y += 3; return; }
+      for (const [k, x] of entries) walk(Array.isArray(v) ? "Item " + k : nice(k, human), x, indent);
+    } else {
+      label(key === null ? "Value" : key, indent);
+      y += 0.5; para(v === null ? "null" : String(v), indent + 4.5);
+      y += 4;
+      if (indent === 0) { need(8); divider(doc, W / 2, y - 1, 24); y += 8; }
+    }
+  }
+  walk(null, value, 0);
+
+  // footers
+  const n = doc.getNumberOfPages();
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i);
+    doc.setFont("times", "italic"); doc.setFontSize(9); doc.setTextColor(...GOLD);
+    doc.text(`${i} of ${n}`, W / 2, H - 17, { align: "center" });
+    diamond(doc, W / 2 - 12, H - 17.8, 0.8, PLUM); diamond(doc, W / 2 + 12, H - 17.8, 0.8, PLUM);
+  }
+  return doc;
+}
+
+$("go").onclick = () => {
+  if (data === null) return;
+  if (!window.jspdf) { say("The PDF library did not load. Check your internet connection and reload.", true); return; }
+  try {
+    build(data, baseName, $("human").checked).save(baseName + ".pdf");
+    say("Done. Your PDF has been downloaded.");
+  } catch (e) { say("Could not create the PDF: " + e.message, true); }
+};
+</script>
+</body>
+</html>
